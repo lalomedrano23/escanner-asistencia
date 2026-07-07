@@ -47,7 +47,9 @@
     let totalRechazados = 0;
     let listaVisible = false;
 
-    // Generador Sintético de Audio para evitar Base64 corruptos
+    // ⚠️ COLOQUÉ TU URL DE APLICACIÓN WEB AQUÍ ABAJO GLOBALMENTE PARA AMBAS FUNCIONES
+    const urlWebApp = "https://script.google.com/macros/s/AKfycbxjH1N_byfBA1M2y3h2UNZ7AAH3nOC8zZnXgAT7oLDHvHk3zgXDJficqGEQi5hexz9AHA/exec"; 
+
     function playBeep(tipo) {
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -57,8 +59,8 @@
         gain.connect(ctx.destination);
         
         if (tipo === 'exito') {
-          osc.frequency.setValueAtTime(587.33, ctx.currentTime); // Re5
-          osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1); // La5
+          osc.frequency.setValueAtTime(587.33, ctx.currentTime); 
+          osc.frequency.setValueAtTime(880, ctx.currentTime + 0.1); 
           gain.gain.setValueAtTime(0.3, ctx.currentTime);
           osc.start();
           osc.stop(ctx.currentTime + 0.25);
@@ -74,7 +76,22 @@
 
     function onScanSuccess(decodedText, decodedResult) {
       html5QrcodeScanner.pause();
-      registrar(decodedText);
+      
+      // === LÓGICA INTELIGENTE PARA VALIDAR SI ES URL O CÓDIGO PLANO ===
+      let codigoParaEnviar = decodedText;
+
+      if (decodedText.includes("script.google.com")) {
+        try {
+          const urlParams = new URL(decodedText).searchParams;
+          if (urlParams.has("codigo")) {
+            codigoParaEnviar = urlParams.get("codigo"); 
+          }
+        } catch (e) {
+          console.error("No se pudo procesar como URL, se enviará original", e);
+        }
+      }
+
+      registrar(codigoParaEnviar);
       setTimeout(() => { html5QrcodeScanner.resume(); }, 2500);
     }
 
@@ -84,57 +101,47 @@
     }
 
     async function registrar(codigo) {
-  document.getElementById('result').innerHTML = 'Procesando código...';
-  document.getElementById('result').className = '';
+      document.getElementById('result').innerHTML = 'Procesando código...';
+      document.getElementById('result').className = '';
 
-  // ⚠️ REEMPLAZA CON TU URL DE APPS SCRIPT (La que genera al implementar como Aplicación Web)
-  const urlWebApp = "https://script.google.com/macros/s/AKfycbxjH1N_byfBA1M2y3h2UNZ7AAH3nOC8zZnXgAT7oLDHvHk3zgXDJficqGEQi5hexz9AHA/exec"; 
+      try {
+        const formData = new FormData();
+        formData.append("codigo", codigo);
 
-  try {
-    // Creamos los parámetros que se enviarán por POST
-    const formData = new FormData();
-    formData.append("codigo", codigo);
+        const response = await fetch(urlWebApp, {
+          method: "POST",
+          body: formData
+        });
 
-    // Enviamos los datos a Google Apps Script
-    const response = await fetch(urlWebApp, {
-      method: "POST",
-      body: formData
-    });
+        const res = await response.json();
+        const div = document.getElementById('result');
+        
+        if (res.success) {
+          totalEscaneados++;
+          document.getElementById('total').textContent = totalEscaneados;
+          div.className = 'success';
+          div.innerHTML = '✅ ' + res.nombre + '<br>Hora: ' + res.hora;
+          document.getElementById('manual').value = '';
+          playBeep('exito');
+          if (navigator.vibrate) navigator.vibrate(200);
+          if (listaVisible) actualizarLista();
+        } else {
+          totalRechazados++;
+          document.getElementById('rechazados').textContent = totalRechazados;
+          div.className = 'error';
+          div.innerHTML = '❌ ' + res.error;
+          playBeep('error');
+          if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+        }
 
-    // Parseamos la respuesta JSON que nos mandará el servidor
-    const res = await response.json();
-
-    const div = document.getElementById('result');
-    
-    // Evaluamos la respuesta igual que lo hacías originalmente
-    if (res.success) {
-      totalEscaneados++;
-      document.getElementById('total').textContent = totalEscaneados;
-      div.className = 'success';
-      div.innerHTML = '✅ ' + res.nombre + '<br>Hora: ' + res.hora;
-      document.getElementById('manual').value = '';
-      playBeep('exito');
-      if (navigator.vibrate) navigator.vibrate(200);
-      if (listaVisible) actualizarLista();
-    } else {
-      // Manejo de errores devueltos por tu lógica de negocio en la Sheet
-       totalRechazados++;
-      document.getElementById('rechazados').textContent = totalRechazados;
-      div.className = 'error';
-      div.innerHTML = '❌ ' + res.error;
-      playBeep('error');
-      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      } catch (error) {
+        console.error("Error de red/servidor:", error);
+        const div = document.getElementById('result');
+        div.className = 'error';
+        div.innerHTML = '❌ Error de conexión con el servidor.';
+        playBeep('error');
+      }
     }
-
-  } catch (error) {
-    // Manejo de errores críticos de conexión (ej. sin internet o URL incorrecta)
-    console.error("Error de red/servidor:", error);
-    const div = document.getElementById('result');
-    div.className = 'error';
-    div.innerHTML = '❌ Error de conexión con el servidor.';
-    playBeep('error');
-  }
-}
 
     function toggleLista() {
       listaVisible = !listaVisible;
@@ -147,17 +154,33 @@
       }
     }
 
-    function actualizarLista() {
+    async function actualizarLista() {
       document.getElementById('lista').innerHTML = 'Cargando asistentes...';
-      google.script.run.withSuccessHandler(function(asistentes) {
+      
+      try {
+        // Le mandamos una acción personalizada por POST para pedir la lista
+        const formData = new FormData();
+        formData.append("accion", "obtenerLista");
+
+        const response = await fetch(urlWebApp, {
+          method: "POST",
+          body: formData
+        });
+        
+        const asistentes = await response.json();
+        
         let html = '<table><tr><th>#</th><th>Nombre</th><th>Hora</th></tr>';
         asistentes.forEach((a, i) => {
           html += `<tr><td>${i+1}</td><td>${a.nombre}</td><td>${a.hora}</td></tr>`;
         });
         html += '</table>';
-        if (asistentes.length === 0) html = 'Aún no hay asistentes en este momento.';
+        if (!asistentes || asistentes.length === 0) html = 'Aún no hay asistentes en este momento.';
         document.getElementById('lista').innerHTML = html;
-      }).obtenerListaAsistentes();
+
+      } catch (error) {
+        console.error("Error al obtener lista:", error);
+        document.getElementById('lista').innerHTML = '❌ No se pudo cargar la lista.';
+      }
     }
 
     let html5QrcodeScanner = new Html5QrcodeScanner("reader", {
